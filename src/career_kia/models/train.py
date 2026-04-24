@@ -22,13 +22,19 @@ from sklearn.metrics import (
 from sklearn.model_selection import GroupKFold
 
 from career_kia.config import PROCESSED_DIR, PROJECT_ROOT
-from career_kia.mlops.mlflow_utils import configure as configure_mlflow
+from career_kia.mlops.mlflow_utils import (
+    compare_runs,
+    configure as configure_mlflow,
+    list_model_versions,
+    register_model,
+)
 from career_kia.models.baselines import make_logistic_baseline, make_rf_baseline
 from career_kia.models.hybrid import HybridConfig, HybridModel
 
 logger = logging.getLogger(__name__)
 
 ARTIFACT_DIR = PROJECT_ROOT / "models_artifacts"
+REGISTERED_MODEL_NAME = "sdf-xplain-hybrid"
 
 META_DROP = [
     "batch_id",
@@ -133,7 +139,9 @@ def run(
         all_results["random_forest"] = res
 
     # --- 3) Hybrid (LightGBM + pyGAM) ---
-    with mlflow.start_run(run_name="hybrid_lgbm_gam"):
+    hybrid_run_id: str | None = None
+    with mlflow.start_run(run_name="hybrid_lgbm_gam") as active_run:
+        hybrid_run_id = active_run.info.run_id
         res = cross_val_evaluate(
             lambda: HybridModel(config=HybridConfig()),
             X,
@@ -145,11 +153,37 @@ def run(
         mlflow.log_param("model", "hybrid_lgbm_gam")
         all_results["hybrid_lgbm_gam"] = res
 
-        # 최종 전체 데이터 학습한 모델도 저장 (XAI/대시보드용)
+        # 최종 전체 데이터 학습한 모델 저장 (XAI/대시보드용)
         final_model = HybridModel(config=HybridConfig()).fit(X, y)
-        joblib.dump(final_model, ARTIFACT_DIR / "hybrid_model.joblib")
-        mlflow.log_artifact(str(ARTIFACT_DIR / "hybrid_model.joblib"))
-        logger.info("최종 하이브리드 모델 저장: %s", ARTIFACT_DIR / "hybrid_model.joblib")
+        model_path = ARTIFACT_DIR / "hybrid_model.joblib"
+        joblib.dump(final_model, model_path)
+        logger.info("최종 하이브리드 모델 저장: %s", model_path)
+
+    # --- 4) 모델 레지스트리 등록 (버저닝) ---
+    try:
+        uri = register_model(
+            model_path,
+            REGISTERED_MODEL_NAME,
+            tags={
+                "roc_auc_mean": f"{res['roc_auc_mean']:.4f}",
+                "pr_auc_mean": f"{res['pr_auc_mean']:.4f}",
+                "feature_count": str(X.shape[1]),
+            },
+            existing_run_id=hybrid_run_id,
+        )
+        logger.info("레지스트리 등록 URI: %s", uri)
+        versions = list_model_versions(REGISTERED_MODEL_NAME)
+        logger.info("현재 '%s' 버전 수: %d", REGISTERED_MODEL_NAME, len(versions))
+    except Exception as exc:  # noqa: BLE001
+        # 로컬 파일 백엔드는 registry 기능이 제한적일 수 있음 — 실패해도 학습 산출물은 유지
+        logger.warning("모델 레지스트리 등록 실패 (%s) — 로컬 joblib 은 정상 저장됨", exc)
+
+    # --- 5) 실험 leaderboard (재학습 이력 비교) ---
+    leaderboard = compare_runs(metric="roc_auc_mean", top_k=5)
+    if leaderboard:
+        logger.info("최근 상위 run (roc_auc_mean 기준):")
+        for entry in leaderboard:
+            logger.info("  %s -> %.4f", entry["run_name"], entry.get("roc_auc_mean") or 0.0)
 
     # 요약 저장
     summary_path = ARTIFACT_DIR / "cv_summary.json"
