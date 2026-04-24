@@ -1,0 +1,70 @@
+# 파이썬 빌드 산출물
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 가상환경
+.venv/
+venv/
+env/
+
+# 의존성 락
+uv.lock
+
+# 주피터
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# MLflow 실험 로그
+mlruns/
+mlartifacts/
+
+# 파이프라인 런타임 산출물 — `make all` 로 재생성 가능
+models_artifacts/
+xai_artifacts/
+causal_artifacts/
+mlops_artifacts/
+
+# 대용량 원본 데이터 (저장소에 커밋하지 않음)
+data/raw/*
+!data/raw/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 테스트/커버리지
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Streamlit
+.streamlit/secrets.toml
