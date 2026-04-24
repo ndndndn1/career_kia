@@ -43,14 +43,12 @@ def shape_factor(x: np.ndarray) -> np.ndarray:
 
 
 def margin_factor(x: np.ndarray) -> np.ndarray:
-    """Peak / (mean(sqrt(|x|)))^2 — 임펄스성에 더 민감한 지표."""
+    """Peak / (mean(sqrt(|x|)))^2 — 임펄스성에 더 민감한 지표.
+
+    문헌에 따라 clearance factor 라고도 불린다.
+    """
     denom = np.mean(np.sqrt(np.abs(x)), axis=-1) ** 2
     return np.where(denom > 0, peak(x) / denom, 0.0)
-
-
-def clearance_factor(x: np.ndarray) -> np.ndarray:
-    """margin_factor 의 별칭 (문헌에 따라 명칭이 다름)."""
-    return margin_factor(x)
 
 
 def zero_crossing_rate(x: np.ndarray) -> np.ndarray:

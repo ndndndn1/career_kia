@@ -7,8 +7,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
@@ -47,17 +45,6 @@ def make_windows(
             padded[: len(remainder)] = remainder
             windows = np.vstack([windows, padded[None, :]])
     return np.ascontiguousarray(windows)
-
-
-def iter_windows(
-    signal: np.ndarray,
-    *,
-    window_size: int = WINDOW_SIZE,
-    stride: int = WINDOW_STRIDE,
-) -> Iterator[np.ndarray]:
-    """메모리 제약이 있을 때의 제너레이터 버전."""
-    for start in range(0, len(signal) - window_size + 1, stride):
-        yield signal[start : start + window_size]
 
 
 def window_count(

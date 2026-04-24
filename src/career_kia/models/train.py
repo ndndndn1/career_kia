@@ -21,13 +21,13 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import GroupKFold
 
-from career_kia.config import PROCESSED_DIR, PROJECT_ROOT, RANDOM_SEED
+from career_kia.config import PROCESSED_DIR, PROJECT_ROOT
+from career_kia.mlops.mlflow_utils import configure as configure_mlflow
 from career_kia.models.baselines import make_logistic_baseline, make_rf_baseline
 from career_kia.models.hybrid import HybridConfig, HybridModel
 
 logger = logging.getLogger(__name__)
 
-MODEL_REGISTRY_DIR = PROJECT_ROOT / "mlruns"
 ARTIFACT_DIR = PROJECT_ROOT / "models_artifacts"
 
 META_DROP = [
@@ -110,8 +110,7 @@ def run(
     experiment_name: str = "sdf-xplain",
 ) -> dict[str, dict[str, float]]:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    mlflow.set_tracking_uri(tracking_uri or f"file://{MODEL_REGISTRY_DIR}")
-    mlflow.set_experiment(experiment_name)
+    configure_mlflow(tracking_uri=tracking_uri, experiment=experiment_name)
 
     X, y, groups = load_feature_matrix(input_path)
     logger.info("피처 행렬: %s, 양성 비율: %.3f", X.shape, y.mean())

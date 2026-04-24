@@ -234,12 +234,21 @@ def _synthesize_cwru_signal(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    """Makefile에서 `make data` 로 호출되는 엔트리포인트."""
+    """Makefile에서 `make data` 로 호출되는 엔트리포인트.
+
+    1) AI4I / CWRU 원본 확보
+    2) 가상 MES batch_id 로 진동 ↔ 공정 조인 → `data/interim/batch_master.parquet`
+    """
+    from career_kia.data.loaders import build_default_joined
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     ai4i = download_ai4i()
     cwru = download_cwru()
     logger.info("AI4I: %s", ai4i)
     logger.info("CWRU: %s", cwru)
+
+    joined = build_default_joined()
+    logger.info("조인 테이블: %d 행 × %d 컬럼", *joined.shape)
 
 
 if __name__ == "__main__":

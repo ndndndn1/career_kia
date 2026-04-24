@@ -65,9 +65,5 @@ NODE_TO_COLUMN: dict[str, str] = {
 }
 
 
-def column_for(node: str) -> str:
-    return NODE_TO_COLUMN[node]
-
-
 def get_default_graph() -> str:
     return CAUSAL_GRAPH_GML.strip()

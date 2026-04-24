@@ -74,11 +74,3 @@ def wavelet_denoise(
         pywt.threshold(c, value=uthresh, mode=mode) for c in coeffs[1:]
     ]
     return pywt.waverec(denoised_coeffs, wavelet)[: len(signal)]
-
-
-def snr_db(clean: np.ndarray, noisy: np.ndarray) -> float:
-    """클린 신호 대비 잡음 SNR (dB)."""
-    noise = noisy - clean
-    if np.all(noise == 0):
-        return float("inf")
-    return 10 * np.log10(np.sum(clean**2) / np.sum(noise**2))
