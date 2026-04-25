@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "src"))
 
 import joblib
@@ -28,6 +29,7 @@ import streamlit as st
 from career_kia.config import PROCESSED_DIR
 from career_kia.models.train import load_feature_matrix
 from career_kia.xai import business_impact, explanation_templates, nl_generator, shap_utils
+from dashboard._helpers import confidence_from_proba, render_confidence_badge
 
 st.set_page_config(
     page_title="SDF-Xplain · Executive Summary",
@@ -101,6 +103,10 @@ if not artifacts_ready:
 today_window = feat.tail(1000)
 yesterday_window = feat.iloc[-2000:-1000] if len(feat) >= 2000 else today_window
 
+today_window = today_window.copy()
+today_window["confidence"] = confidence_from_proba(today_window["risk_score"].values)
+avg_confidence_today = float(today_window["confidence"].mean())
+
 high_risk = today_window[today_window["risk_score"] > 0.5]
 expected_loss_today = sum(
     business_impact.translate_batch_risk_to_krw(r, assumptions)
@@ -113,11 +119,12 @@ delta_pp = (avg_risk_today - avg_risk_yesterday) * 100
 # ---------------------------------------------------------------------------
 # KPI
 # ---------------------------------------------------------------------------
-k1, k2, k3, k4 = st.columns(4)
+k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("고위험 배치", f"{len(high_risk):,} 건")
 k2.metric("예측 손실", business_impact.format_krw(expected_loss_today))
 k3.metric("평균 리스크", f"{avg_risk_today*100:.1f}%")
 k4.metric("전일 대비", f"{delta_pp:+.1f}%p", delta=f"{delta_pp:+.1f}")
+k5.metric("평균 신뢰도", f"{avg_confidence_today*100:.0f}%", help="max(p, 1-p) 기준 — 높을수록 모델이 확신")
 
 st.markdown("---")
 
@@ -160,6 +167,7 @@ if len(high_risk) == 0:
 else:
     top_idx = high_risk["risk_score"].idxmax()
     top_row = feat.loc[top_idx]
+    top_confidence = float(confidence_from_proba(float(top_row["risk_score"])))
     local = shap_utils.explain_batch(model, X.iloc[[top_idx]])
     contribution = explanation_templates.build_contribution(
         local,
@@ -174,6 +182,7 @@ else:
         f"가장 위험한 배치 **{top_row['batch_id']}** (리스크 "
         f"{top_row['risk_score']*100:.0f}%) 기반 권장 조치"
     )
+    render_confidence_badge(top_confidence, prefix="이 예측 신뢰도")
 
     cols = st.columns(len(actions))
     icons = ["🔧", "⚙️", "🔍"]
@@ -194,7 +203,8 @@ st.markdown("---")
 # ---------------------------------------------------------------------------
 st.info(
     "더 자세한 분석은 좌측 사이드바에서 페이지를 선택하세요 — "
-    "**1. 실시간 모니터링** · **2. 불량원인 설명** · **3. 변수중요도 트렌드** · **4. What-if 개입 시뮬레이션**"
+    "**1. 실시간 모니터링** · **2. 불량원인 설명** · **3. 변수중요도 트렌드** · "
+    "**4. What-if 개입 시뮬레이션** · **5. 데이터 출처 & 사용처**"
 )
 
 with st.expander("📘 프로젝트 소개 (Software Defined Factory · SDF-Xplain)"):

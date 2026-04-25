@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "src"))
 
 import joblib
@@ -24,6 +25,7 @@ from career_kia.config import PROCESSED_DIR
 from career_kia.models.train import load_feature_matrix
 from career_kia.xai import shap_utils
 from career_kia.xai.nl_generator import FEATURE_LABELS
+from dashboard._helpers import confidence_from_proba
 
 
 st.set_page_config(page_title="변수중요도 트렌드", page_icon="📊", layout="wide")
@@ -105,19 +107,27 @@ st.plotly_chart(fig, use_container_width=True)
 # ---------------------------------------------------------------------------
 # 시간축 리스크 트렌드
 # ---------------------------------------------------------------------------
-st.subheader("시간축 리스크 신호 (이동평균)")
+st.subheader("시간축 리스크 신호 (이동평균) · 신뢰도")
 proba = model.predict_proba(X)[:, 1]
+conf = confidence_from_proba(proba)
 feat_sorted = feat.sort_values("timestamp").reset_index(drop=True)
 feat_sorted["리스크 (%)"] = proba[feat_sorted.index] * 100
 feat_sorted["이동평균"] = feat_sorted["리스크 (%)"].rolling(100, min_periods=10).mean()
+feat_sorted["신뢰도 이동평균 (%)"] = (
+    pd.Series(conf[feat_sorted.index]).rolling(100, min_periods=10).mean() * 100
+)
 fig = px.line(
     feat_sorted,
     x="timestamp",
-    y=["리스크 (%)", "이동평균"],
-    labels={"value": "리스크 (%)", "variable": ""},
+    y=["리스크 (%)", "이동평균", "신뢰도 이동평균 (%)"],
+    labels={"value": "값 (%)", "variable": ""},
 )
 fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10))
 st.plotly_chart(fig, use_container_width=True)
+st.caption(
+    f"전체 평균 신뢰도: **{float(np.mean(conf))*100:.0f}%** — 신뢰도가 일시적으로 떨어지는 구간은 "
+    "모델이 판단을 망설인 시점이므로 추가 점검이 필요합니다."
+)
 
 if not analyst_mode:
     st.caption(

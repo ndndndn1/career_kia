@@ -1,0 +1,11 @@
+feature_a,feature_b,mean_abs_interaction
+Air temperature [K],Rotational speed [rpm],0.49969265132815066
+Air temperature [K],Process temperature [K],0.32548420560291313
+Rotational speed [rpm],Torque [Nm],0.2600612900173991
+Process temperature [K],Rotational speed [rpm],0.2555245088500488
+Air temperature [K],Torque [Nm],0.2496443846285624
+Torque [Nm],Tool wear [min],0.18020644233238672
+Rotational speed [rpm],t_rms_mean,0.1704386253160546
+Process temperature [K],Torque [Nm],0.1529084700492804
+Rotational speed [rpm],Tool wear [min],0.1457077576201555
+Torque [Nm],t_rms_mean,0.14417331830252417

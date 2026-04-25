@@ -37,9 +37,19 @@ mlruns/
 mlartifacts/
 
 # 파이프라인 런타임 산출물 — `make all` 로 재생성 가능
-models_artifacts/
-xai_artifacts/
-causal_artifacts/
+# 단, Streamlit Cloud 배포 즉시 동작을 위해 핵심 데모 산출물(<3MB)은 예외 허용
+# (디렉터리 자체가 아니라 내용을 ignore 해야 negation 이 동작함 → `*` 사용)
+models_artifacts/*
+!models_artifacts/hybrid_model.joblib
+!models_artifacts/cv_summary.json
+xai_artifacts/*
+!xai_artifacts/shap_global.parquet
+!xai_artifacts/shap_interactions_top10.csv
+!xai_artifacts/top_risk_narratives.json
+!xai_artifacts/top_risk_narratives.txt
+causal_artifacts/*
+!causal_artifacts/ate_summary.json
+!causal_artifacts/doseresp_*.csv
 mlops_artifacts/
 
 # 대용량 원본 데이터 (저장소에 커밋하지 않음)
@@ -49,6 +59,7 @@ data/interim/*
 !data/interim/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+!data/processed/features.parquet
 
 # IDE
 .vscode/

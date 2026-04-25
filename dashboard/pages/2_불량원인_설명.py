@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "src"))
 
 import joblib
@@ -28,6 +29,7 @@ from career_kia.xai import (
     shap_utils,
 )
 from career_kia.xai.nl_generator import FEATURE_LABELS
+from dashboard._helpers import confidence_from_proba, render_confidence_badge
 
 
 st.set_page_config(page_title="불량원인 설명", page_icon="🔍", layout="wide")
@@ -105,6 +107,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 row = feat.iloc[sel_idx]
 risk = float(proba[sel_idx])
+confidence = float(confidence_from_proba(risk))
 local = shap_utils.explain_batch(model, X.iloc[[sel_idx]])
 contribution = explanation_templates.build_contribution(
     local,
@@ -133,6 +136,7 @@ with top_left:
 with top_right:
     st.markdown("### 위험 수준")
     st.plotly_chart(_gauge(risk), use_container_width=True)
+    render_confidence_badge(confidence, prefix="이 예측 신뢰도")
     c1, c2 = st.columns(2)
     c1.metric("실제 고장", "Yes" if row["Machine failure"] else "No")
     c2.metric("기대 손실", business_impact.format_krw(expected_loss))

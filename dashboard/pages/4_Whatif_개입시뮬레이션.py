@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "src"))
 
 import numpy as np
@@ -21,6 +22,7 @@ import streamlit as st
 
 from career_kia.config import PROJECT_ROOT
 from career_kia.xai import business_impact
+from dashboard._helpers import render_confidence_badge
 
 
 st.set_page_config(page_title="조건 변경 시뮬", page_icon="🧪", layout="wide")
@@ -93,6 +95,31 @@ c4.metric(
     business_impact.format_krw(annual_savings),
     delta="절감" if annual_savings > 0 else "증가",
 )
+
+# 인과추정 신뢰도 — DoWhy refutation 결과 기반
+ref = summary[treatment].get("refutation", {})
+ate_est = float(summary[treatment]["ate"])
+
+def _stable(name: str, *, rel_tol: float = 0.20) -> bool:
+    val = ref.get(name)
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return False
+    if abs(ate_est) < 1e-9:
+        return abs(val) < 1e-3
+    return abs(val - ate_est) / abs(ate_est) <= rel_tol
+
+passes = [n for n in ("random_common_cause", "data_subset_refuter") if _stable(n)]
+total = 2
+causal_conf = len(passes) / total
+ref_str = " · ".join(
+    f"{k}={ref[k]:+.4f}" for k in ("random_common_cause", "data_subset_refuter")
+    if k in ref and not (isinstance(ref[k], float) and np.isnan(ref[k]))
+)
+render_confidence_badge(
+    max(causal_conf, 0.5),
+    prefix=f"인과 추정 신뢰도 ({len(passes)}/{total} 반박 통과)",
+)
+st.caption(f"반박 검정 결과: {ref_str or '값 없음'}  ·  ATE 자체 = {ate_est:+.4f}")
 
 # ---------------------------------------------------------------------------
 # 곡선 + 우측 ₩ 보조축

@@ -1,0 +1,32 @@
+{
+  "Tool_wear": {
+    "treatment_value": 200.0,
+    "control_value": 50.0,
+    "ate": 0.044702307476001846,
+    "refutation": {
+      "random_common_cause": 0.04470230747600185,
+      "placebo_treatment_refuter": NaN,
+      "data_subset_refuter": 0.04462235564160191
+    }
+  },
+  "Torque": {
+    "treatment_value": 60.0,
+    "control_value": 40.0,
+    "ate": 0.06759056613282372,
+    "refutation": {
+      "random_common_cause": 0.06759056613282372,
+      "placebo_treatment_refuter": NaN,
+      "data_subset_refuter": 0.06846620905416834
+    }
+  },
+  "Rotational_speed": {
+    "treatment_value": 1300.0,
+    "control_value": 1600.0,
+    "ate": 0.059116020073847045,
+    "refutation": {
+      "random_common_cause": 0.059116020073847045,
+      "placebo_treatment_refuter": NaN,
+      "data_subset_refuter": 0.05906025780641172
+    }
+  }
+}
