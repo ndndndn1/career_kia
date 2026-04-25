@@ -1,21 +1,41 @@
-"""현장용 자연어 설명 생성.
+"""현장용 자연어 설명 생성 — WHAT → ACTION → WHY 계층.
 
-SHAP 기반 ContributionExplanation / ThresholdExplanation / InteractionExplanation 을
-현장 엔지니어·경영진이 읽기 쉬운 **한국어 문장**으로 변환한다. 규칙 기반이라
-외부 LLM 의존 없이 재현 가능하며, 배포 환경에서도 안전하게 동작한다.
+Phase 11 (Revision 2) 재설계 사양
+---------------------------------
+경영진/현장 엔지니어가 SHAP 숫자 없이 상황을 이해할 수 있도록
+**정상 범위 대비 평문 + ₩ 영향 + 권장 조치** 를 우선 제공한다.
+
+함수 계층
+~~~~~~~~~
+- ``what_happened_bullets``       : SHAP 숫자 없이 정상 범위 대비 평문 (WHAT)
+- ``executive_summary``           : 3-4 문장 요약 + ₩ 기대 손실
+- ``recommended_actions``         : 상위 2-3 조치 카드 (₩ 절감 추정 포함)
+- ``technical_details_sentences`` : 분석가용 SHAP 기반 상세 (WHY, expander 안)
+
+기존 함수 ``contribution_to_sentences`` 는 ``technical_details_sentences``
+의 별칭으로 보존한다.
 """
 
 from __future__ import annotations
 
+import math
+
+from career_kia.xai.business_impact import (
+    BusinessAssumptions,
+    action_recommendation,
+    format_krw,
+    translate_batch_risk_to_krw,
+)
 from career_kia.xai.explanation_templates import (
     BatchExplanation,
     ContributionExplanation,
     InteractionExplanation,
     ThresholdExplanation,
 )
+from career_kia.xai.normal_ranges import describe_deviation, is_out_of_range
 
 # ---------------------------------------------------------------------------
-# 변수명 → 한국어 친화명 매핑
+# 변수명 → 한국어 친화명
 # ---------------------------------------------------------------------------
 
 FEATURE_LABELS: dict[str, str] = {
@@ -31,14 +51,14 @@ FEATURE_LABELS: dict[str, str] = {
     "t_crest_factor_mean": "크레스트 팩터 평균",
     "t_crest_factor_max": "크레스트 팩터 최대",
     "t_impulse_factor_max": "임펄스 팩터 최대",
-    "f_env_BPFI_mean": "BPFI(내륜 결함 주파수) 포락선 평균",
-    "f_env_BPFI_max": "BPFI(내륜 결함 주파수) 포락선 최대",
-    "f_env_BPFO_mean": "BPFO(외륜 결함 주파수) 포락선 평균",
-    "f_env_BPFO_max": "BPFO(외륜 결함 주파수) 포락선 최대",
-    "f_env_BSF_mean": "BSF(볼 자전 주파수) 포락선 평균",
-    "f_env_BSF_max": "BSF(볼 자전 주파수) 포락선 최대",
-    "f_env_FTF_mean": "FTF(케이지 주파수) 포락선 평균",
-    "f_env_FTF_max": "FTF(케이지 주파수) 포락선 최대",
+    "f_env_BPFI_mean": "BPFI(내륜) 포락선 평균",
+    "f_env_BPFI_max": "BPFI(내륜) 포락선 최대",
+    "f_env_BPFO_mean": "BPFO(외륜) 포락선 평균",
+    "f_env_BPFO_max": "BPFO(외륜) 포락선 최대",
+    "f_env_BSF_mean": "BSF(볼) 포락선 평균",
+    "f_env_BSF_max": "BSF(볼) 포락선 최대",
+    "f_env_FTF_mean": "FTF(케이지) 포락선 평균",
+    "f_env_FTF_max": "FTF(케이지) 포락선 최대",
     "f_spec_entropy_mean": "스펙트럴 엔트로피",
     "f_spec_centroid_mean": "스펙트럴 중심",
 }
@@ -69,16 +89,130 @@ def _fmt_value(value: float, feature: str) -> str:
     return f"{value:.3f}{unit}"
 
 
+def _risk_level(prob: float) -> str:
+    if prob >= 0.66:
+        return "🔴 높음"
+    if prob >= 0.33:
+        return "🟡 보통"
+    return "🟢 낮음"
+
+
 # ---------------------------------------------------------------------------
-# 문장 생성
+# WHAT: 정상 범위 대비 평문 (SHAP 숫자 노출 금지)
 # ---------------------------------------------------------------------------
 
-def contribution_to_sentences(exp: ContributionExplanation) -> list[str]:
-    """개별 샘플 기여도 → 한국어 문장 리스트."""
+def what_happened_bullets(
+    contribution: ContributionExplanation,
+    *,
+    top_k: int = 3,
+) -> list[str]:
+    """리스크를 끌어올린 상위 변수들을 정상 범위 대비 평문으로 서술.
+
+    SHAP 값/부호/소수점 표현은 본문에 일절 포함하지 않는다.
+    """
+    pos_contribs = [c for c in contribution.contributions if c["shap"] > 0]
+    if not pos_contribs:
+        return ["현재 비정상 신호가 감지되지 않았습니다."]
+
+    bullets: list[str] = []
+    for c in pos_contribs[:top_k]:
+        feat, val = c["feature"], float(c["value"])
+        if is_out_of_range(feat, val):
+            bullets.append(describe_deviation(feat, val))
+        else:
+            bullets.append(
+                f"{_label(feat)} = {_fmt_value(val, feat)} 가 평소와 다른 패턴"
+            )
+    return bullets
+
+
+# ---------------------------------------------------------------------------
+# Executive summary: 3-4 문장 + ₩
+# ---------------------------------------------------------------------------
+
+def executive_summary(
+    contribution: ContributionExplanation,
+    assumptions: BusinessAssumptions,
+) -> str:
+    """경영진용 3-4 문장 요약 (₩ 기대 손실 포함, SHAP 숫자 없음)."""
+    risk = max(0.0, min(1.0, contribution.prediction))
+    risk_pct = risk * 100
+    expected_loss = translate_batch_risk_to_krw(risk, assumptions)
+    level = _risk_level(risk)
+
+    lines = [
+        f"배치 **{contribution.sample_id}** 의 고장 위험은 {level} ({risk_pct:.0f}%) 입니다.",
+        f"이 배치에서 발생할 수 있는 기대 손실은 약 **{format_krw(expected_loss)}** 입니다.",
+    ]
+    bullets = what_happened_bullets(contribution, top_k=2)
+    if bullets and bullets[0] != "현재 비정상 신호가 감지되지 않았습니다.":
+        lines.append("주된 원인: " + " · ".join(bullets))
+    else:
+        lines.append("뚜렷한 위험 신호는 관찰되지 않습니다.")
+    return " ".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# 권장 조치 카드
+# ---------------------------------------------------------------------------
+
+def recommended_actions(
+    contribution: ContributionExplanation,
+    assumptions: BusinessAssumptions,
+    *,
+    top_k: int = 3,
+) -> list[dict]:
+    """상위 위험 변수 → 조치 카드 매핑.
+
+    Returns
+    -------
+    list of dict with keys: feature, label, description, estimated_cost_krw,
+    estimated_cost_text, expected_loss_text.
+    """
+    expected_loss = translate_batch_risk_to_krw(contribution.prediction, assumptions)
+    expected_loss_text = format_krw(expected_loss)
+
+    cards: list[dict] = []
+    seen_labels: set[str] = set()
+    for c in contribution.contributions:
+        if c["shap"] <= 0:
+            continue
+        card = action_recommendation(c["feature"], assumptions)
+        if card is None:
+            continue
+        if card["label"] in seen_labels:
+            continue
+        seen_labels.add(card["label"])
+        card = {**card, "expected_loss_text": expected_loss_text}
+        cards.append(card)
+        if len(cards) >= top_k:
+            break
+
+    if not cards:
+        cards.append(
+            {
+                "feature": "",
+                "label": "추가 모니터링",
+                "description": "직접 매칭되는 조치가 없습니다. 다음 배치까지 관찰을 유지하세요.",
+                "estimated_cost_krw": 0,
+                "estimated_cost_text": "비용 없음",
+                "expected_loss_text": expected_loss_text,
+            }
+        )
+    return cards
+
+
+# ---------------------------------------------------------------------------
+# 분석가용 (WHY) — 기존 SHAP 기반 상세
+# ---------------------------------------------------------------------------
+
+def technical_details_sentences(exp: ContributionExplanation) -> list[str]:
+    """SHAP 기반 상세 — expander 내부에서만 사용."""
     risk_pct = max(0.0, min(1.0, exp.prediction)) * 100
+    base_pct = max(0.0, min(1.0, _sigmoid(exp.base_value))) * 100
     head = (
-        f"배치 {exp.sample_id} 의 예측 고장 확률은 {risk_pct:.1f}% 입니다 "
-        f"(기준 확률 {max(0.0, min(1.0, _sigmoid(exp.base_value)))*100:.1f}% 대비)."
+        f"배치 {exp.sample_id} 의 예측 고장 확률은 {risk_pct:.1f}% "
+        f"(기준 확률 {base_pct:.1f}% 대비)."
     )
 
     bullets: list[str] = [head]
@@ -104,6 +238,10 @@ def contribution_to_sentences(exp: ContributionExplanation) -> list[str]:
                 f"(기여도 {c['shap']:+.3f})"
             )
     return bullets
+
+
+# 하위 호환 — 기존 노트북/리포트 호출처
+contribution_to_sentences = technical_details_sentences
 
 
 def thresholds_to_sentences(thresholds: list[ThresholdExplanation]) -> list[str]:
@@ -133,9 +271,9 @@ def interactions_to_sentences(inter: InteractionExplanation | None) -> list[str]
 
 
 def batch_explanation_to_paragraph(batch_exp: BatchExplanation) -> str:
-    """BatchExplanation 전체를 한 문단 스토리로 구성."""
+    """기존 호환 — 분석가 모드에서 BatchExplanation 전체 상세 출력."""
     lines: list[str] = []
-    lines.extend(contribution_to_sentences(batch_exp.contribution))
+    lines.extend(technical_details_sentences(batch_exp.contribution))
     lines.append("")
     lines.extend(thresholds_to_sentences(batch_exp.thresholds))
     lines.append("")
@@ -144,6 +282,4 @@ def batch_explanation_to_paragraph(batch_exp: BatchExplanation) -> str:
 
 
 def _sigmoid(x: float) -> float:
-    import math
-
     return 1.0 / (1.0 + math.exp(-x))

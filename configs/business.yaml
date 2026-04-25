@@ -1,0 +1,56 @@
+# ⚠️ 플레이스홀더 가정치 — 실제 라인 운영값으로 교체 필요.
+# 본 프로젝트는 포트폴리오 데모이므로 통상 자동차 부품 가공 라인의 공개
+# 벤치마크를 참고한 보수적 추정치를 사용한다. 실제 도입 시 재무팀과 협의해
+# 라인별 값으로 갱신한다.
+
+# ── 매출/생산 ─────────────────────────────────────────────
+revenue_per_hour_krw: 12_000_000        # 시간당 라인 매출 (₩)
+batches_per_hour: 60                    # 시간당 처리 배치 수
+defect_cost_per_batch_krw: 250_000      # 불량 1건 손실 (재가공·폐기·검사 비용 포함)
+
+# ── 다운타임 ──────────────────────────────────────────────
+downtime_per_failure_hours: 4           # 고장 1건당 평균 라인 정지 시간
+downtime_cost_per_hour_krw: 8_500_000   # 다운타임 1시간당 기회비용
+
+# ── 부품/공구 ─────────────────────────────────────────────
+tool_replacement_cost_krw: 180_000      # 공구 1회 교체 비용
+bearing_replacement_cost_krw: 1_200_000 # 베어링 1회 교체 비용
+
+# ── 운영 가정 ─────────────────────────────────────────────
+operating_hours_per_year: 6_000         # 연간 가동 시간 (2교대 × 250일)
+
+# ── 권장 조치 매핑 ─────────────────────────────────────────
+# 피처 → (조치 라벨, 설명, 비용 카테고리)
+action_map:
+  "Tool wear [min]":
+    label: "공구 교체"
+    description: "현재 공구 마모도가 임계치를 초과했습니다. 교체 후 재가공."
+    cost_category: tool_replacement
+  "Torque [Nm]":
+    label: "토크 설정 재조정"
+    description: "토크 편차가 위험 구간입니다. 가공 파라미터를 재교정하세요."
+    cost_category: setup_adjustment
+  "Rotational speed [rpm]":
+    label: "회전 속도 점검"
+    description: "회전수가 기준 범위를 벗어났습니다. 스핀들/드라이브 점검."
+    cost_category: setup_adjustment
+  "Process temperature [K]":
+    label: "냉각 시스템 점검"
+    description: "공정 온도가 비정상 상승. 냉각수·공조 점검 필요."
+    cost_category: maintenance
+  "Air temperature [K]":
+    label: "주변 환경 점검"
+    description: "대기 온도가 기준에서 이탈. HVAC/환기 확인."
+    cost_category: maintenance
+  "t_rms_max":
+    label: "베어링 점검"
+    description: "스핀들 진동(RMS) 급증. 베어링·정렬 점검 권장."
+    cost_category: bearing_replacement
+  "f_env_BPFI_max":
+    label: "베어링 내륜 점검"
+    description: "내륜 결함 주파수 신호가 강합니다. 베어링 교체 검토."
+    cost_category: bearing_replacement
+  "f_env_BPFO_max":
+    label: "베어링 외륜 점검"
+    description: "외륜 결함 주파수 신호가 강합니다. 베어링 교체 검토."
+    cost_category: bearing_replacement
