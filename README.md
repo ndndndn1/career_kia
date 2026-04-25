@@ -6,22 +6,14 @@
 
 ## 🚀 라이브 데모
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/deploy?repository=ndndndn1/career_kia&branch=main&mainModule=dashboard/app.py)
+**👉 <https://duty-kia-260426.streamlit.app/>**
 
-- **실행 화면**: 위 배지 클릭 → Streamlit Community Cloud 로 1-클릭 배포
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://duty-kia-260426.streamlit.app/)
+
 - **로컬 실행**: `make dash` (또는 `streamlit run dashboard/app.py`)
-- **포함 보드 (5)**: 🏠 Executive Summary · 📈 실시간 모니터링 · 🔍 불량원인 설명 · 📊 변수중요도 트렌드 · 🧪 What-if 개입 시뮬 · 🗂️ 데이터 출처 & 사용처
+- **포함 보드 (6)**: 🏠 Executive Summary · 📈 실시간 모니터링 · 🔍 불량원인 설명 · 📊 변수중요도 트렌드 · 🧪 What-if 개입 시뮬 · 🗂️ 데이터 출처 & 사용처
 - **신뢰도 표시**: 모든 예측 옆에 `confidence = max(p, 1-p)` 기반 신뢰도 등급(매우 높음/높음/중간/낮음) 노출
-
-> 첫 배포 후 라이브 URL 을 받으면 위 배지 링크를 그 주소로 교체하세요.
-> (예: `https://career-kia.streamlit.app`)
-
-### 1-클릭 배포 절차
-1. 이 저장소를 본인 GitHub 로 fork (또는 그대로 사용 — public 이면 OK)
-2. <https://share.streamlit.io> 에서 GitHub 로 로그인
-3. **New app** → repo `ndndndn1/career_kia`, branch `main`, main file `dashboard/app.py`
-4. **Deploy** — 의존성은 `requirements.txt` + `.streamlit/config.toml` 자동 인식
-5. 배포된 URL 을 위 배지 링크에 반영
+- **호스팅**: Streamlit Community Cloud · 의존성은 `requirements.txt` + `.streamlit/config.toml` 자동 인식
 
 ---
 
