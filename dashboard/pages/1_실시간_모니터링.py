@@ -21,7 +21,7 @@ import streamlit as st
 
 from career_kia.config import PROCESSED_DIR
 from career_kia.models.train import load_feature_matrix
-from dashboard._helpers import confidence_from_proba
+from dashboard._helpers import decision_clarity
 
 
 st.set_page_config(page_title="실시간 모니터링", page_icon="📈", layout="wide")
@@ -36,11 +36,12 @@ def _load_all():
     proba = model.predict_proba(X)[:, 1]
     feat = feat.sort_values("timestamp").reset_index(drop=True)
     feat["risk_score"] = proba[feat.index]
-    feat["confidence"] = confidence_from_proba(feat["risk_score"].values)
-    return feat
+    prior = float(y.mean())
+    feat["clarity"] = decision_clarity(feat["risk_score"].to_numpy(), prior)
+    return feat, prior
 
 
-df = _load_all()
+df, prior = _load_all()
 
 # 사이드바 — 라인 / 시프트 필터
 with st.sidebar:
@@ -60,14 +61,20 @@ c2.metric("고장 건수", int(filtered["Machine failure"].sum()))
 c3.metric("고위험(>50%)", int((filtered["risk_score"] > 0.5).sum()))
 c4.metric("평균 리스크", f"{filtered['risk_score'].mean()*100:.1f}%")
 c5.metric(
-    "평균 신뢰도",
-    f"{filtered['confidence'].mean()*100:.0f}%",
-    help="max(p, 1-p) — 모델이 얼마나 확신하는지의 평균",
+    "강한 신호 배치",
+    int((filtered["clarity"] >= 0.30).sum()),
+    help=(
+        f"prior(평균 위험률) {prior*100:.1f}% 대비 결정 명확도 ≥ 30% 인 배치 수.\n"
+        "양성 비율이 낮은 데이터에서 max(p,1-p) 가 saturate 되는 문제를 회피한 지표."
+    ),
 )
 
-# 리스크 시계열 (+ 신뢰도 표시)
-st.subheader("배치별 예측 리스크 · 신뢰도")
-st.caption("점 색상이 진할수록 모델이 그 예측을 강하게 확신합니다 (max(p, 1-p) 기준).")
+# 리스크 시계열 (+ 결정 명확도 표시)
+st.subheader("배치별 예측 리스크 · 결정 명확도")
+st.caption(
+    f"점 색상이 진할수록 평균 위험률({prior*100:.1f}%) 과 다른 강한 신호 — "
+    "saturated 된 max(p,1-p) 대신 prior 대비 정보량을 표시합니다."
+)
 fig = go.Figure()
 fig.add_trace(
     go.Scatter(
@@ -82,15 +89,17 @@ fig.add_trace(
         x=filtered["timestamp"], y=filtered["risk_score"] * 100,
         mode="markers",
         marker=dict(
-            color=filtered["confidence"] * 100,
-            colorscale="Blues",
-            cmin=50, cmax=100,
+            color=filtered["clarity"] * 100,
+            colorscale="Viridis",
+            cmin=0, cmax=100,
             size=5,
-            colorbar=dict(title="신뢰도 (%)", thickness=12),
+            colorbar=dict(title="결정 명확도 (%)", thickness=12),
         ),
         name="배치별 리스크",
-        customdata=filtered["confidence"] * 100,
-        hovertemplate="시각=%{x}<br>리스크=%{y:.1f}%<br>신뢰도=%{customdata:.0f}%<extra></extra>",
+        customdata=filtered["clarity"] * 100,
+        hovertemplate=(
+            "시각=%{x}<br>리스크=%{y:.1f}%<br>결정 명확도=%{customdata:.0f}%<extra></extra>"
+        ),
     )
 )
 fail_points = filtered[filtered["Machine failure"] == 1]
@@ -108,14 +117,17 @@ fig.update_layout(
 )
 st.plotly_chart(fig, use_container_width=True)
 
-# 신뢰도 분포 — 작게
-with st.expander("예측 신뢰도 분포 (히스토그램)", expanded=False):
+with st.expander("결정 명확도 분포 (히스토그램)", expanded=False):
     hist = px.histogram(
-        filtered, x=filtered["confidence"] * 100, nbins=20,
-        labels={"x": "신뢰도 (%)"},
+        filtered, x=filtered["clarity"] * 100, nbins=20,
+        labels={"x": "결정 명확도 (%)"},
     )
     hist.update_layout(height=220, margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
     st.plotly_chart(hist, use_container_width=True)
+    st.caption(
+        "왼쪽(낮은 명확도): 평균과 비슷 → 정보 적음. "
+        "오른쪽(높은 명확도): 평균과 다름 → 강한 신호."
+    )
 
 # 공정 파라미터 시계열
 st.subheader("공정 파라미터")

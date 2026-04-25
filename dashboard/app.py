@@ -29,7 +29,13 @@ import streamlit as st
 from career_kia.config import PROCESSED_DIR
 from career_kia.models.train import load_feature_matrix
 from career_kia.xai import business_impact, explanation_templates, nl_generator, shap_utils
-from dashboard._helpers import confidence_from_proba, render_confidence_badge
+from dashboard._helpers import (
+    compute_logit_se,
+    decision_clarity,
+    render_clarity_badge,
+    render_stability_badge,
+    se_to_stability,
+)
 
 st.set_page_config(
     page_title="SDF-Xplain · Executive Summary",
@@ -42,12 +48,16 @@ st.set_page_config(
 def _bootstrap():
     feat = pd.read_parquet(PROCESSED_DIR / "features.parquet")
     model = joblib.load(_ROOT / "models_artifacts" / "hybrid_model.joblib")
-    X, _y, _ = load_feature_matrix()
+    X, y, _ = load_feature_matrix()
     proba = model.predict_proba(X)[:, 1]
     feat = feat.sort_values("timestamp").reset_index(drop=True)
     feat["risk_score"] = proba[feat.index]
+    prior = float(y.mean())
+    feat["clarity"] = decision_clarity(feat["risk_score"].to_numpy(), prior)
+    se = compute_logit_se(model, X)
+    feat["logit_se"] = se[feat.index]
     assumptions = business_impact.load_assumptions()
-    return model, X, feat, assumptions
+    return model, X, feat, assumptions, prior, se
 
 
 def _gauge(value: float) -> go.Figure:
@@ -77,7 +87,7 @@ def _gauge(value: float) -> go.Figure:
 
 
 try:
-    model, X, feat, assumptions = _bootstrap()
+    model, X, feat, assumptions, prior, se_all = _bootstrap()
     artifacts_ready = True
 except (FileNotFoundError, OSError) as e:
     artifacts_ready = False
@@ -100,12 +110,11 @@ if not artifacts_ready:
 # 분석 대상: 가장 최근 24시간(또는 가용 마지막 1000건)
 # ---------------------------------------------------------------------------
 
-today_window = feat.tail(1000)
+today_window = feat.tail(1000).copy()
 yesterday_window = feat.iloc[-2000:-1000] if len(feat) >= 2000 else today_window
 
-today_window = today_window.copy()
-today_window["confidence"] = confidence_from_proba(today_window["risk_score"].values)
-avg_confidence_today = float(today_window["confidence"].mean())
+avg_clarity_today = float(today_window["clarity"].mean())
+strong_signal_today = int((today_window["clarity"] >= 0.30).sum())
 
 high_risk = today_window[today_window["risk_score"] > 0.5]
 expected_loss_today = sum(
@@ -124,7 +133,14 @@ k1.metric("고위험 배치", f"{len(high_risk):,} 건")
 k2.metric("예측 손실", business_impact.format_krw(expected_loss_today))
 k3.metric("평균 리스크", f"{avg_risk_today*100:.1f}%")
 k4.metric("전일 대비", f"{delta_pp:+.1f}%p", delta=f"{delta_pp:+.1f}")
-k5.metric("평균 신뢰도", f"{avg_confidence_today*100:.0f}%", help="max(p, 1-p) 기준 — 높을수록 모델이 확신")
+k5.metric(
+    "강한 신호 배치",
+    f"{strong_signal_today} 건",
+    help=(
+        f"prior(평균 위험률) {prior*100:.1f}% 대비 결정 명확도 ≥ 30% 인 배치 수.\n"
+        "max(p,1-p) 가 불균형 데이터에서 항상 ≈100% 가 되는 문제를 회피한 지표."
+    ),
+)
 
 st.markdown("---")
 
@@ -167,7 +183,9 @@ if len(high_risk) == 0:
 else:
     top_idx = high_risk["risk_score"].idxmax()
     top_row = feat.loc[top_idx]
-    top_confidence = float(confidence_from_proba(float(top_row["risk_score"])))
+    top_clarity = float(top_row["clarity"])
+    top_se = float(top_row["logit_se"])
+    top_stability = 1.0 - float((se_all < top_se).mean())
     local = shap_utils.explain_batch(model, X.iloc[[top_idx]])
     contribution = explanation_templates.build_contribution(
         local,
@@ -182,7 +200,11 @@ else:
         f"가장 위험한 배치 **{top_row['batch_id']}** (리스크 "
         f"{top_row['risk_score']*100:.0f}%) 기반 권장 조치"
     )
-    render_confidence_badge(top_confidence, prefix="이 예측 신뢰도")
+    badge_cols = st.columns([1, 1, 4])
+    with badge_cols[0]:
+        render_clarity_badge(top_clarity)
+    with badge_cols[1]:
+        render_stability_badge(top_stability, top_se)
 
     cols = st.columns(len(actions))
     icons = ["🔧", "⚙️", "🔍"]

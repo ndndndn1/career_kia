@@ -29,7 +29,12 @@ from career_kia.xai import (
     shap_utils,
 )
 from career_kia.xai.nl_generator import FEATURE_LABELS
-from dashboard._helpers import confidence_from_proba, render_confidence_badge
+from dashboard._helpers import (
+    compute_logit_se,
+    decision_clarity,
+    render_clarity_badge,
+    render_stability_badge,
+)
 
 
 st.set_page_config(page_title="불량원인 설명", page_icon="🔍", layout="wide")
@@ -43,7 +48,9 @@ def _load_model_and_data():
     model = joblib.load(_ROOT / "models_artifacts" / "hybrid_model.joblib")
     X, y, _ = load_feature_matrix()
     assumptions = business_impact.load_assumptions()
-    return model, X, y, feat, assumptions
+    prior = float(y.mean())
+    se_all = compute_logit_se(model, X)
+    return model, X, y, feat, assumptions, prior, se_all
 
 
 def _gauge(value: float) -> go.Figure:
@@ -72,7 +79,7 @@ def _gauge(value: float) -> go.Figure:
     return fig
 
 
-model, X, y, feat, assumptions = _load_model_and_data()
+model, X, y, feat, assumptions, prior, se_all = _load_model_and_data()
 proba = model.predict_proba(X)[:, 1]
 
 # ---------------------------------------------------------------------------
@@ -107,7 +114,9 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 row = feat.iloc[sel_idx]
 risk = float(proba[sel_idx])
-confidence = float(confidence_from_proba(risk))
+clarity = float(decision_clarity(risk, prior))
+se_value = float(se_all[sel_idx])
+stability = 1.0 - float((se_all < se_value).mean())
 local = shap_utils.explain_batch(model, X.iloc[[sel_idx]])
 contribution = explanation_templates.build_contribution(
     local,
@@ -136,7 +145,12 @@ with top_left:
 with top_right:
     st.markdown("### 위험 수준")
     st.plotly_chart(_gauge(risk), use_container_width=True)
-    render_confidence_badge(confidence, prefix="이 예측 신뢰도")
+    render_clarity_badge(clarity)
+    render_stability_badge(stability, se_value)
+    st.caption(
+        f"평균 위험률 prior = {prior*100:.1f}%. 결정 명확도는 prior 대비 정보량, "
+        "모델 안정성은 pyGAM logit SE 의 분위 기반."
+    )
     c1, c2 = st.columns(2)
     c1.metric("실제 고장", "Yes" if row["Machine failure"] else "No")
     c2.metric("기대 손실", business_impact.format_krw(expected_loss))

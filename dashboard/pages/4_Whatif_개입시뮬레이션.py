@@ -22,7 +22,7 @@ import streamlit as st
 
 from career_kia.config import PROJECT_ROOT
 from career_kia.xai import business_impact
-from dashboard._helpers import render_confidence_badge
+from dashboard._helpers import stability_label
 
 
 st.set_page_config(page_title="조건 변경 시뮬", page_icon="🧪", layout="wide")
@@ -110,16 +110,23 @@ def _stable(name: str, *, rel_tol: float = 0.20) -> bool:
 
 passes = [n for n in ("random_common_cause", "data_subset_refuter") if _stable(n)]
 total = 2
-causal_conf = len(passes) / total
+causal_stability = len(passes) / total
 ref_str = " · ".join(
     f"{k}={ref[k]:+.4f}" for k in ("random_common_cause", "data_subset_refuter")
     if k in ref and not (isinstance(ref[k], float) and np.isnan(ref[k]))
 )
-render_confidence_badge(
-    max(causal_conf, 0.5),
-    prefix=f"인과 추정 신뢰도 ({len(passes)}/{total} 반박 통과)",
+label, color = stability_label(causal_stability)
+st.markdown(
+    f"<div style='display:inline-block;padding:2px 8px;border-radius:8px;"
+    f"background:{color}22;color:{color};font-size:0.85rem;font-weight:600;'>"
+    f"인과 추정 안정성 {causal_stability*100:.0f}% · {label} "
+    f"({len(passes)}/{total} 반박 통과)</div>",
+    unsafe_allow_html=True,
 )
-st.caption(f"반박 검정 결과: {ref_str or '값 없음'}  ·  ATE 자체 = {ate_est:+.4f}")
+st.caption(
+    f"반박 검정 결과: {ref_str or '값 없음'}  ·  ATE 자체 = {ate_est:+.4f}. "
+    "분류 모델의 결정 명확도와 달리, 인과 신뢰도는 *반박 검정 통과율* 로 정의."
+)
 
 # ---------------------------------------------------------------------------
 # 곡선 + 우측 ₩ 보조축

@@ -1,48 +1,122 @@
 """대시보드 공통 헬퍼.
 
-- 예측 신뢰도(confidence) 계산 / 표시 유틸
+- 예측 결정 명확도(decision clarity, A) — 평균 위험률(prior) 대비 정보량
+- 모델 흔들림(logit-space SE, B) — pyGAM 메타 모델의 표준오차
 - 데이터 출처(source) ↔ 예측 보드 사용처 레지스트리
+
+배경 — 본 데이터는 양성 비율 ~3.4% 의 극심한 불균형이므로 max(p, 1-p) 형태의
+"신뢰도" 는 모든 배치에서 ≈100% 가 되어 정보를 주지 못한다. 그래서:
+  · A: 평균 위험률 prior 대비 |p - prior| 를 정규화 → "이 예측이 평소와 얼마나
+        다른가" 를 0~1 로 표현
+  · B: pyGAM 의 logit 공간 SE — 확률이 saturated 된 영역에서도 흔들림 측정 가능
 """
 
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import streamlit as st
+from scipy import sparse
 
 
 # ---------------------------------------------------------------------------
-# 신뢰도 (probabilistic confidence)
+# A. 결정 명확도 (decision clarity vs prior)
 # ---------------------------------------------------------------------------
 
-def confidence_from_proba(proba: float | np.ndarray) -> float | np.ndarray:
-    """이진 확률 p 에서 신뢰도 = max(p, 1-p) 반환.
+def decision_clarity(
+    proba: float | np.ndarray, prior: float
+) -> float | np.ndarray:
+    """평균 위험률 prior 대비 |p - prior| / max(prior, 1-prior) 반환.
 
-    p=0.5 (가장 불확실) → 0.5,  p=0.99 → 0.99.
-    벡터/스칼라 모두 지원.
+    - p == prior 면 0 (정보 없음)
+    - p 가 0 또는 1 로 갈수록 1 (강한 신호)
+    - 불균형 데이터(prior 0.034)에서도 분포가 펼쳐짐 — max(p,1-p) 의 saturation 회피.
     """
     p = np.asarray(proba, dtype=float)
-    conf = np.maximum(p, 1.0 - p)
-    return float(conf) if conf.ndim == 0 else conf
+    denom = max(float(prior), 1.0 - float(prior))
+    clarity = np.minimum(np.abs(p - float(prior)) / denom, 1.0)
+    return float(clarity) if clarity.ndim == 0 else clarity
 
 
-def confidence_label(conf: float) -> tuple[str, str]:
-    """(라벨, 색상 hex) — 한글 등급 + Streamlit metric 호환 색."""
-    if conf >= 0.90:
-        return "매우 높음", "#27ae60"
-    if conf >= 0.75:
-        return "높음", "#2ecc71"
-    if conf >= 0.60:
-        return "중간", "#f1c40f"
-    return "낮음", "#e74c3c"
+def clarity_label(clarity: float) -> tuple[str, str]:
+    """결정 명확도 등급 (라벨, 색상). 분포가 양극단에 몰리는 특성을 고려한 컷오프."""
+    if clarity >= 0.70:
+        return "강한 신호", "#27ae60"
+    if clarity >= 0.30:
+        return "중간 신호", "#2ecc71"
+    if clarity >= 0.10:
+        return "약한 신호", "#f1c40f"
+    return "평균과 유사", "#95a5a6"
 
 
-def render_confidence_badge(conf: float, *, prefix: str = "신뢰도") -> None:
-    """metric 옆에 두면 어울리는 짧은 배지."""
-    label, color = confidence_label(conf)
+def render_clarity_badge(
+    clarity: float, *, prefix: str = "결정 명확도"
+) -> None:
+    """결정 명확도 배지 (A)."""
+    label, color = clarity_label(clarity)
     st.markdown(
         f"<div style='display:inline-block;padding:2px 8px;border-radius:8px;"
         f"background:{color}22;color:{color};font-size:0.85rem;font-weight:600;'>"
-        f"{prefix} {conf*100:.0f}% · {label}</div>",
+        f"{prefix} {clarity*100:.0f}% · {label}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# B. 모델 흔들림 (logit-space SE from pyGAM)
+# ---------------------------------------------------------------------------
+
+def compute_logit_se(model, X: pd.DataFrame) -> np.ndarray:
+    """HybridModel(LightGBM + LogisticGAM) 의 logit 공간 표준오차 (per-sample).
+
+    Returns array of shape (n,). 값이 클수록 모델이 흔들리는 예측.
+    """
+    gam = model.gam_
+    X_san = model._prepare_X(X)
+    p_lgbm = model.lgbm_.predict_proba(X_san)[:, 1]
+    z = np.clip(p_lgbm, 1e-4, 1.0 - 1e-4)
+    lgbm_logit = np.log(z / (1.0 - z))
+    cols = [model.feature_names_[i] for i in model.interpret_idx_]
+    meta_X = np.column_stack([lgbm_logit, X[cols].to_numpy()])
+    mm = gam._modelmat(meta_X)
+    mm = mm.toarray() if sparse.issparse(mm) else np.asarray(mm)
+    cov = gam.statistics_["cov"]
+    var = np.einsum("ij,jk,ik->i", mm, cov, mm)
+    return np.sqrt(np.maximum(var, 0.0))
+
+
+def se_to_stability(se_array: np.ndarray, se_value: float | None = None):
+    """SE 분포를 0~1 안정성 점수로 변환 (1 = 가장 안정).
+
+    벡터(se_array) 만 받으면 전체 안정성 벡터, se_value 도 주면 단일 값 반환.
+    """
+    se_array = np.asarray(se_array, dtype=float)
+    rank = pd.Series(se_array).rank(pct=True).to_numpy()  # 0..1
+    stability = 1.0 - rank
+    if se_value is None:
+        return stability
+    # se_value 의 분위 기반 안정성
+    pct = float((se_array <= se_value).mean())  # 작은 SE 비율
+    # SE 가 작으면 stability ↑
+    return 1.0 - float((se_array < se_value).mean())
+
+
+def stability_label(stability: float) -> tuple[str, str]:
+    if stability >= 0.75:
+        return "매우 안정", "#27ae60"
+    if stability >= 0.50:
+        return "안정", "#2ecc71"
+    if stability >= 0.25:
+        return "흔들림", "#f1c40f"
+    return "매우 흔들림", "#e74c3c"
+
+
+def render_stability_badge(stability: float, se_value: float) -> None:
+    label, color = stability_label(stability)
+    st.markdown(
+        f"<div style='display:inline-block;padding:2px 8px;border-radius:8px;"
+        f"background:{color}22;color:{color};font-size:0.8rem;font-weight:600;'>"
+        f"모델 안정성 {stability*100:.0f}% · {label} (logit SE={se_value:.1f})</div>",
         unsafe_allow_html=True,
     )
 
