@@ -106,23 +106,26 @@ def what_happened_bullets(
     *,
     top_k: int = 3,
 ) -> list[str]:
-    """리스크를 끌어올린 상위 변수들을 정상 범위 대비 평문으로 서술.
+    """리스크를 끌어올린 상위 변수를 평문 + 정량 영향(%) 으로 서술.
 
-    SHAP 값/부호/소수점 표현은 본문에 일절 포함하지 않는다.
+    형식: "<정상 범위 대비 서술> · 위험 기여 +XX%"
+    숫자(기여도 비율)는 분석가뿐 아니라 경영진 의사결정에도 유용하므로 노출한다.
     """
     pos_contribs = [c for c in contribution.contributions if c["shap"] > 0]
     if not pos_contribs:
         return ["현재 비정상 신호가 감지되지 않았습니다."]
 
+    total_pos = sum(c["shap"] for c in pos_contribs) or 1.0
+
     bullets: list[str] = []
     for c in pos_contribs[:top_k]:
         feat, val = c["feature"], float(c["value"])
+        share = c["shap"] / total_pos * 100.0
         if is_out_of_range(feat, val):
-            bullets.append(describe_deviation(feat, val))
+            head = describe_deviation(feat, val)
         else:
-            bullets.append(
-                f"{_label(feat)} = {_fmt_value(val, feat)} 가 평소와 다른 패턴"
-            )
+            head = f"{_label(feat)} = {_fmt_value(val, feat)} 가 평소와 다른 패턴"
+        bullets.append(f"{head} · 위험 기여 +{share:.0f}%")
     return bullets
 
 
@@ -134,14 +137,16 @@ def executive_summary(
     contribution: ContributionExplanation,
     assumptions: BusinessAssumptions,
 ) -> str:
-    """경영진용 3-4 문장 요약 (₩ 기대 손실 포함, SHAP 숫자 없음)."""
+    """경영진용 3-4 문장 요약 (확률·₩·기여도 등 정량 정보 포함)."""
     risk = max(0.0, min(1.0, contribution.prediction))
     risk_pct = risk * 100
+    base_pct = max(0.0, min(1.0, _sigmoid(contribution.base_value))) * 100
     expected_loss = translate_batch_risk_to_krw(risk, assumptions)
     level = _risk_level(risk)
 
     lines = [
-        f"배치 **{contribution.sample_id}** 의 고장 위험은 {level} ({risk_pct:.0f}%) 입니다.",
+        f"배치 **{contribution.sample_id}** 의 고장 위험은 {level} "
+        f"({risk_pct:.0f}%, 기준 확률 {base_pct:.0f}% 대비) 입니다.",
         f"이 배치에서 발생할 수 있는 기대 손실은 약 **{format_krw(expected_loss)}** 입니다.",
     ]
     bullets = what_happened_bullets(contribution, top_k=2)

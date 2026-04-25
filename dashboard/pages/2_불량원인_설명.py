@@ -27,6 +27,7 @@ from career_kia.xai import (
     nl_generator,
     shap_utils,
 )
+from career_kia.xai.nl_generator import FEATURE_LABELS
 
 
 st.set_page_config(page_title="불량원인 설명", page_icon="🔍", layout="wide")
@@ -158,32 +159,39 @@ for i, (col, card) in enumerate(zip(cols, actions)):
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
-# WHY (하단 expander)
+# WHY (기본 노출) — 변수별 위험 기여도 Waterfall
 # ---------------------------------------------------------------------------
-with st.expander("📊 세부 근거 보기 (분석가용)"):
-    st.markdown("##### SHAP 기여도 (Waterfall)")
-    feature_values = local.X.iloc[0].values
-    sorted_idx = np.argsort(-np.abs(local.values[0]))[:10]
-    feature_labels = [
-        f"{local.feature_names[i]} = {feature_values[i]:.2f}"
-        for i in sorted_idx
-    ]
-    shap_values = local.values[0][sorted_idx]
-    fig = go.Figure(
-        go.Waterfall(
-            orientation="h",
-            y=feature_labels[::-1],
-            x=shap_values[::-1],
-            connector={"line": {"color": "rgb(63, 63, 63)"}},
-            decreasing={"marker": {"color": "steelblue"}},
-            increasing={"marker": {"color": "crimson"}},
-        )
+st.markdown("### 📊 변수별 위험 기여도 (Waterfall)")
+st.caption(
+    "각 막대 길이는 해당 변수가 평균 대비 위험을 얼마나 끌어올리거나(빨강) 낮추는지(파랑) 를 의미합니다."
+)
+feature_values = local.X.iloc[0].values
+sorted_idx = np.argsort(-np.abs(local.values[0]))[:10]
+feature_labels = [
+    f"{FEATURE_LABELS.get(local.feature_names[i], local.feature_names[i])} "
+    f"= {feature_values[i]:.2f}"
+    for i in sorted_idx
+]
+shap_values = local.values[0][sorted_idx]
+fig = go.Figure(
+    go.Waterfall(
+        orientation="h",
+        y=feature_labels[::-1],
+        x=shap_values[::-1],
+        connector={"line": {"color": "rgb(63, 63, 63)"}},
+        decreasing={"marker": {"color": "steelblue"}},
+        increasing={"marker": {"color": "crimson"}},
     )
-    fig.update_layout(
-        height=450, margin=dict(l=10, r=10, t=20, b=10), xaxis_title="SHAP 값"
-    )
-    st.plotly_chart(fig, use_container_width=True)
+)
+fig.update_layout(
+    height=450, margin=dict(l=10, r=10, t=20, b=10),
+    xaxis_title="위험 기여도 (SHAP 값, +면 위험↑ / -면 위험↓)",
+)
+st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("##### 분석가용 자연어 상세")
+# ---------------------------------------------------------------------------
+# 분석가 상세 (선택적, expander)
+# ---------------------------------------------------------------------------
+with st.expander("🔬 분석가용 상세 — SHAP 통계 표현"):
     paragraph = nl_generator.batch_explanation_to_paragraph(batch_exp)
     st.markdown(paragraph.replace("\n", "  \n"))

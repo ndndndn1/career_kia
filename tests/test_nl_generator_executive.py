@@ -66,18 +66,21 @@ def _make_contrib(risk: float = 0.72) -> ContributionExplanation:
     )
 
 
-def test_what_happened_bullets_no_shap_numbers():
+def test_what_happened_bullets_describe_deviation_and_share():
+    """본문은 (1) 정상 범위 대비 평문 + (2) 위험 기여 % 둘 다 포함한다."""
     contrib = _make_contrib()
     bullets = nl_generator.what_happened_bullets(contrib)
     text = " ".join(bullets)
-    # SHAP 숫자/용어 미노출
-    assert "SHAP" not in text
-    assert "기여도" not in text
-    assert "+0.42" not in text
-    assert "+0.21" not in text
-    # 정상 범위 대비 평문
+    # 정상 범위 대비 평문 (현장 엔지니어 납득용)
     assert "공구 마모" in text
     assert "초과" in text or "범위" in text
+    # 정량 영향 — 경영진/현장이 우선순위를 가늠할 수 있도록 % 노출
+    assert "%" in text
+    assert "위험 기여" in text
+    # 합산이 100% 를 초과하지 않는지 (top_k=3 기준)
+    import re
+    shares = [int(x) for x in re.findall(r"위험 기여 \+(\d+)%", text)]
+    assert sum(shares) <= 100
 
 
 def test_what_happened_bullets_no_positive_returns_default():
@@ -93,16 +96,18 @@ def test_what_happened_bullets_no_positive_returns_default():
     assert any("비정상" in b or "감지되지" in b for b in bullets)
 
 
-def test_executive_summary_contains_currency(assumptions):
+def test_executive_summary_contains_quantitative_signals(assumptions):
     contrib = _make_contrib()
     text = nl_generator.executive_summary(contrib, assumptions)
+    # ₩ 단위
     assert "원" in text or "₩" in text
     assert "B000123" in text
     # 위험 표현
     assert any(token in text for token in ["높음", "보통", "낮음"])
-    # SHAP 숫자 미노출
-    assert "기여도" not in text
-    assert "+0.42" not in text
+    # 확률(%) 가 명시적으로 노출 (경영진이 숫자를 볼 수 있도록)
+    assert "%" in text
+    # 기준 확률 대비 비교가 포함되어야 함
+    assert "기준 확률" in text
 
 
 def test_recommended_actions_maps_positive_only_and_dedupes(assumptions):
