@@ -10,7 +10,6 @@ import logging
 from pathlib import Path
 
 import joblib
-import mlflow
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
@@ -22,47 +21,30 @@ from sklearn.metrics import (
 from sklearn.model_selection import GroupKFold
 
 from career_kia.config import PROCESSED_DIR, PROJECT_ROOT
-from career_kia.mlops.mlflow_utils import (
-    compare_runs,
-    configure as configure_mlflow,
-    list_model_versions,
-    register_model,
-)
 from career_kia.models.baselines import make_logistic_baseline, make_rf_baseline
+from career_kia.models.feature_matrix import META_DROP, load_feature_matrix
 from career_kia.models.hybrid import HybridConfig, HybridModel
+
+# mlflow / mlflow_utils 는 학습 함수 내부에서 lazy import (대시보드 등 추론 경로에서
+# 끌려가지 않도록). Python 3.14 + 최신 protobuf 환경의 mlflow 호환 이슈 회피.
 
 logger = logging.getLogger(__name__)
 
 ARTIFACT_DIR = PROJECT_ROOT / "models_artifacts"
 REGISTERED_MODEL_NAME = "sdf-xplain-hybrid"
 
-META_DROP = [
-    "batch_id",
-    "timestamp",
-    "shift",
-    "operator_id",
-    "line_id",
-    "vibration_fault_type",
-    "Machine failure",
-    "TWF",
-    "HDF",
-    "PWF",
-    "OSF",
-    "RNF",
+# 후방 호환을 위해 기존 심볼은 그대로 노출
+__all__ = [
+    "ARTIFACT_DIR",
+    "REGISTERED_MODEL_NAME",
+    "META_DROP",
+    "load_feature_matrix",
+    "precision_at_recall",
+    "eval_model",
+    "cross_val_evaluate",
+    "run",
+    "main",
 ]
-
-
-def load_feature_matrix(path: Path | None = None) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
-    """피처 테이블 → (X, y, groups). groups는 누수 방지용 일자 단위 batch_id 접두."""
-    path = Path(path) if path else PROCESSED_DIR / "features.parquet"
-    df = pd.read_parquet(path)
-    y = df["Machine failure"].astype(int)
-    # operator_id 단위 GroupKFold — 작업자 간 누수 방지
-    groups = df["operator_id"].astype(str)
-    # Type(L/M/H)은 카테고리 → 원핫
-    df = pd.get_dummies(df, columns=["Type"], drop_first=False)
-    X = df.drop(columns=[c for c in META_DROP if c in df.columns])
-    return X, y, groups
 
 
 def precision_at_recall(y_true: np.ndarray, y_proba: np.ndarray, recall_target: float = 0.9) -> float:
@@ -115,6 +97,15 @@ def run(
     tracking_uri: str | None = None,
     experiment_name: str = "sdf-xplain",
 ) -> dict[str, dict[str, float]]:
+    # mlflow 의존성은 학습 시점에만 필요 — 추론/대시보드에서 끌려가지 않도록 lazy import.
+    import mlflow
+    from career_kia.mlops.mlflow_utils import (
+        compare_runs,
+        configure as configure_mlflow,
+        list_model_versions,
+        register_model,
+    )
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     configure_mlflow(tracking_uri=tracking_uri, experiment=experiment_name)
 

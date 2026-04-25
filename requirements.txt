@@ -1,5 +1,7 @@
 # Streamlit Community Cloud 배포용 런타임 의존성.
-# 로컬 개발은 pyproject.toml + uv 사용 (이 파일은 그 일부 + 시각화 부속).
+# 로컬 개발은 pyproject.toml + uv 사용 (이 파일은 추론/대시보드 최소 셋).
+# mlflow / dowhy / econml / lime 은 학습·인과 파이프라인에서만 필요하므로 제외
+# (Cloud 빌드 시간 단축 + Python 3.14 protobuf 호환성 회피).
 streamlit>=1.35
 plotly>=5.22
 numpy>=1.26,<3.0
@@ -13,6 +15,5 @@ pygam>=0.9
 shap>=0.45
 joblib>=1.4
 pyyaml>=6.0
-mlflow>=2.13
 requests>=2.32
 tqdm>=4.66
